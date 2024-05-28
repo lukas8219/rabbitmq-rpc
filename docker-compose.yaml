@@ -1,0 +1,12 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    hostname: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - ./enabled_plugins:/etc/rabbitmq/enabled_plugins
+    environment:
+      RABBITMQ_DEFAULT_USER: lucas
+      RABBITMQ_DEFAULT_PASS: local
