@@ -96,7 +96,6 @@ class RpcServer {
                 const { replyTo, correlationId } = message.properties;
                 const response = await handler(...args);
                 const methodResponseQueue = `${methodName}:response:${replyTo}`;
-                console.log(methodResponseQueue);
                 await this.#channel.publish(this.#resource, methodResponseQueue, Buffer.from(JSON.stringify(response || null)), { correlationId });
                 await this.#channel.ack(message);
             }, {});

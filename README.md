@@ -4,6 +4,8 @@ Pet Project to implement RPC-based Services using RabbitMQ as back-bone. This ai
 
 
 ## Examples
+Examples in `examples` folder
+
 ### Service
 ```javascript
 class UserService {
