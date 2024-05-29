@@ -1,6 +1,7 @@
 # Rabbit RPC
 
 Pet Project to implement RPC-based Services using RabbitMQ as back-bone. This aims to present an abstraction where you can code as simple classes.
+*Currently, it only covers most of the Happy Path Scenarios: missing stuff like Timeouts/Circuit Breakers, dealing w/ NACK, Factory for the Clients*
 
 
 ## Examples
