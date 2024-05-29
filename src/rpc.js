@@ -2,6 +2,7 @@ class RpcClient {
     #resource;
     #__inFlight = {};
     #__assertedMethodNames = new Set();
+    #__identifier = `${Date.now()}`;
     constructor(resource, amqpChannel){
         this.#resource = resource;
         this.amqpChannel = amqpChannel;
@@ -13,10 +14,10 @@ class RpcClient {
     async call(methodName, ...args){
         return new Promise(async (resolve) => {
             const _id = `${Date.now()}`;
-            const argsWId = [_id, ...args];
             this.#__inFlight[_id] = resolve;
             await this.subscribeToResponse(methodName);
-            await this.amqpChannel.publish(this.#resource, methodName, Buffer.from(JSON.stringify(argsWId)));
+            //TODO: Should we dynamically create the Queue?
+            await this.amqpChannel.publish(this.#resource, methodName, Buffer.from(JSON.stringify([...args])), { replyTo: this.#__identifier, correlationId: _id });
         })
     }
 
@@ -25,12 +26,14 @@ class RpcClient {
             return;
         }
         this.#__assertedMethodNames.add(methodName);
-        //try catch and remove if fail
+        //TODO: try catch and remove if fail
+        const methodResponseQueue = `${methodName}:response:${this.#__identifier}`;
         await this.amqpChannel.assertExchange(this.#resource, 'direct');
-        await this.amqpChannel.assertQueue(`${methodName}:response`, { exclusive: true });
-        return this.amqpChannel.consume(`${methodName}:response`, async (message) => {
-            const [_id, ...args] = JSON.parse(message.body);
-            await this.#__inFlight[_id](...args);
+        await this.amqpChannel.assertQueue(methodResponseQueue, { exclusive: true });
+        await this.amqpChannel.bindQueue(methodResponseQueue, this.#resource, methodResponseQueue);
+        return this.amqpChannel.consume(methodResponseQueue, async (message) => {
+            const { properties: { correlationId }, content } = message;
+            await this.#__inFlight[correlationId](JSON.parse(content));
             this.amqpChannel.ack(message);
         });
     }
@@ -47,7 +50,7 @@ class RpcServer {
     }
 
     static create(clazz){
-
+        //TODO create enhanced class object
     }
 
     addListener(methodName, handler){
@@ -58,10 +61,15 @@ class RpcServer {
         await this.#channel.assertExchange(this.#resource, 'direct');
         for(const [method, handler] of this.#methods.entries()){
             await this.#channel.assertQueue(method);
+            await this.#channel.assertExchange(this.#resource);
             await this.#channel.consume(method, async (message) => {
-                const response = await handler(message);
-                await this.#channel.publish(this.#resource, `${method}:response`, Buffer.from(JSON.stringify(response)));
-                awaitthis.#channel.ack(message);
+                const [...args] = JSON.parse(message.content);
+                const { replyTo, correlationId } = message.properties;
+                const response = await handler(...args);
+                const methodResponseQueue = `${method}:response:${replyTo}`;
+                console.log(methodResponseQueue);
+                await this.#channel.publish(this.#resource, methodResponseQueue, Buffer.from(JSON.stringify(response || null)), { correlationId });
+                await this.#channel.ack(message);
             }, {});
         }
     }

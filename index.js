@@ -6,13 +6,16 @@ async function run(){
     const channel = await connection.createChannel();
 
     const rpcClient = new RpcClient('rpc-api', channel);
-
     const server = new RpcServer('rpc-api', channel);
 
-    await server.addListener('do-something', console.log);
-    await server.listen();
+    await server.addListener('do-something', (message, someId) => console.log('message is', message, someId));
+    await server.addListener('fetch-some-data', (id) => ({ id, timestamp: Date.now() }))
+    server.listen();
 
-    const response = await rpcClient.call('do-something');    
+    setInterval(async () => {
+        const response = await rpcClient.call('fetch-some-data', '12331');
+        console.log('response is', response);
+    });
 }
 
 run();
