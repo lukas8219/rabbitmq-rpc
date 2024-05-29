@@ -8,11 +8,25 @@ class RpcClient {
         this.amqpChannel = amqpChannel;
     }
 
-    static create(clazz){
+    static create(clazz, amqpChannel){
+        const client = new RpcClient(clazz.name, amqpChannel);
+        const enhancedClazz = class {};
+        for(const key of Object.getOwnPropertyNames(clazz.prototype)){
+            if(key === 'constructor'){
+                continue;
+            }
+            Object.defineProperty(enhancedClazz.prototype, key, {
+                value(){
+                    return client.call(key, ...arguments);
+                }
+            })
+        }
+        return enhancedClazz;
     }
 
-    async call(methodName, ...args){
+    async call(method, ...args){
         return new Promise(async (resolve) => {
+            const methodName = `${this.#resource}:${method}`;
             const _id = `${Date.now()}`;
             this.#__inFlight[_id] = resolve;
             await this.subscribeToResponse(methodName);
@@ -26,9 +40,13 @@ class RpcClient {
             return;
         }
         this.#__assertedMethodNames.add(methodName);
+
         //TODO: try catch and remove if fail
         const methodResponseQueue = `${methodName}:response:${this.#__identifier}`;
         await this.amqpChannel.assertExchange(this.#resource, 'direct');
+        await this.amqpChannel.assertQueue(methodName);
+        await this.amqpChannel.bindQueue(methodName, this.#resource, methodName);
+
         await this.amqpChannel.assertQueue(methodResponseQueue, { exclusive: true });
         await this.amqpChannel.bindQueue(methodResponseQueue, this.#resource, methodResponseQueue);
         return this.amqpChannel.consume(methodResponseQueue, async (message) => {
@@ -49,8 +67,19 @@ class RpcServer {
         this.#methods = new Map();
     }
 
-    static create(clazz){
-        //TODO create enhanced class object
+    static create(clazz, amqpChannel){
+        const server = new RpcServer(clazz.name, amqpChannel);
+        const enhancedClazz = class {};
+        for(const key of Object.getOwnPropertyNames(clazz.prototype)){
+            if(key === 'constructor'){
+                continue;
+            }
+            server.addListener(key, clazz.prototype[key]);
+        }
+        Object.defineProperty(enhancedClazz.prototype, 'listen', {
+            value: server.listen.bind(server),
+        })
+        return enhancedClazz;
     }
 
     addListener(methodName, handler){
@@ -60,29 +89,18 @@ class RpcServer {
     async listen(){
         await this.#channel.assertExchange(this.#resource, 'direct');
         for(const [method, handler] of this.#methods.entries()){
-            await this.#channel.assertQueue(method);
-            await this.#channel.assertExchange(this.#resource);
-            await this.#channel.consume(method, async (message) => {
+            const methodName = `${this.#resource}:${method}`;
+            await this.#channel.assertQueue(methodName);
+            await this.#channel.consume(methodName, async (message) => {
                 const [...args] = JSON.parse(message.content);
                 const { replyTo, correlationId } = message.properties;
                 const response = await handler(...args);
-                const methodResponseQueue = `${method}:response:${replyTo}`;
+                const methodResponseQueue = `${methodName}:response:${replyTo}`;
                 console.log(methodResponseQueue);
                 await this.#channel.publish(this.#resource, methodResponseQueue, Buffer.from(JSON.stringify(response || null)), { correlationId });
                 await this.#channel.ack(message);
             }, {});
         }
-    }
-}
-
-class UserRpcService {
-    #rpcClient;
-    constructor(rpcClient) {
-        this.#rpcClient = rpcClient;
-    }
-
-    fetchUsers(){
-        return this.#rpcClient.call('fetch-users');
     }
 }
 
