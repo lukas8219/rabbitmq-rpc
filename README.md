@@ -40,3 +40,8 @@ const userServiceRpcServer = new UserServiceRpcServer(repository);
 
 userServiceRpcServer.listen();
 ```
+
+### Roadmap
+- [] Implement proper Factory methods
+    - Want to be able to customize bindings, exchanges, queue names, identifier names
+- [] Implement timeouts for Client side
