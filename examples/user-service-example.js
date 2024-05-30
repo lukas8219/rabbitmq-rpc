@@ -1,9 +1,13 @@
+const { promisify } = require('util');
 const { RpcClient, RpcServer } = require('../src/rpc');
 const amqplib = require('amqplib');
 
+//util to bottleneck server
+//const sleep = promisify(setTimeout);
+
 class UserRpcService {
 
-    fetchUsers(_id){
+    async fetchUsers(_id){
         if(_id === 1){
             return { name: 'Lucas'}
         }
@@ -15,8 +19,11 @@ async function run(){
     const connection = await amqplib.connect('amqp://lucas:local@localhost:5672');
     const channel = await connection.createChannel();
 
-    new Array(Number(process.argv[3]) || 1).fill(1).forEach(() => runClient(channel));
-    new Array(Number(process.argv[4]) || 1).fill(1).forEach(() => runServer(channel));    
+    const clientNUmber = Number(process.argv[3])
+    const serverNumber = Number(process.argv[4]);
+
+    new Array(isNaN(clientNUmber) ? 1 : clientNUmber).fill(1).forEach(() => runClient(channel));
+    new Array(isNaN(serverNumber) ? 1 : serverNumber).fill(1).forEach(() => runServer(channel));    
 }
 
 async function runServer(amqpChannel){
@@ -32,8 +39,7 @@ async function runClient(amqpChannel){
 
     setInterval(async () => {
         const response = await userRpcServiceClient.fetchUsers(1);
-        console.log('received response from user rpc', response);
-    }, 100)
+    }, 1000)
 }
 
 run();

@@ -12,7 +12,7 @@ class RpcUtils {
 */
 class RpcClient {
     #resource;
-    #__inFlight = {}; //TODO: This would not perform well. What if there are some thousands of concurrent requests? Acessing large objects via indexing would cause a huge perf hit.
+    #__inFlightObject = {}; //TODO: This would not perform well. What if there are some thousands of concurrent requests? Acessing large objects via indexing would cause a huge perf hit.
     #__assertedResponseQueue = false;
     #__identifier;
     #__seqNumber = 0;
@@ -43,9 +43,8 @@ class RpcClient {
             try {
                 const methodName = `${this.#resource}:${method}`;
                 const _id = `${Date.now()}#${++this.#__seqNumber}`;
-                this.#__inFlight[_id] = resolve;
+                this.#__inFlightMethod.insert(_id, resolve);
                 await this.subscribeToResponse(methodName);
-                //TODO: Should we dynamically create the Queue?
                 await this.amqpChannel.publish(this.#resource, methodName, Buffer.from(JSON.stringify([...args])), { replyTo: this.#__identifier, correlationId: _id });
             } catch(err){
                 return reject(err);
@@ -65,15 +64,38 @@ class RpcClient {
         await this.amqpChannel.bindQueue(methodResponseQueue, this.#resource, methodResponseQueue);
         return this.amqpChannel.consume(methodResponseQueue, async (message) => {
             const { properties: { correlationId }, content } = message;
-            const method = this.#__inFlight[correlationId];
+            const method = this.#__inFlightMethod.search(correlationId);
             if(!method){
-                console.log(`debug: ${correlationId} not found for client ${this.#__identifier}`);
-                return this.amqpChannel.ack(message);
+                if((process.env.DEBUG || "").includes('rabbitmq-rpc')){
+                    console.log(`debug: ${correlationId} not found for client ${this.#__identifier}`);
+                    return this.amqpChannel.ack(message);
+                }
+                this.amqpChannel.nack(message);
+                throw new Error(`Correlation ${correlationId} not found for identifier ${this.#__identifier} ${methodResponseQueue}`);
             }
-            await this.#__inFlight[correlationId](JSON.parse(content));
-            delete this.#__inFlight[correlationId];
+            await method(JSON.parse(content));
+            this.#__inFlightMethod.delete(correlationId);
             this.amqpChannel.ack(message);
         });
+    }
+
+    //TODO experiment better data structures for high concurrency scenarios
+    get #__inFlightMethod(){
+        const self = this.#__inFlightObject;
+        return {
+            search(correlation){
+                return self[correlation];
+            },
+            insert(correlation, method){
+                self[correlation] = method;
+            },
+            delete(correlation){
+                delete self[correlation];
+            },
+            length(){
+                return Object.keys(self).length;
+            }
+        }
     }
 }
 
