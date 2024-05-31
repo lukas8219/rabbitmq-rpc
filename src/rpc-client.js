@@ -7,14 +7,16 @@ class RpcClient {
     #__assertedResponseQueue = false;
     #__identifier;
     #__seqNumber = 0;
-    constructor(resource, amqpChannel){
+    #__options = {}
+    constructor(resource, amqpChannel, options){
         this.#resource = resource;
         this.amqpChannel = amqpChannel;
         this.#__identifier = `${SequenceNumber.generateHash(resource)}`;
+        this.#__options = Object.assign({ timeout: 30000 }, options)
     }
 
-    static create(clazz, amqpChannel){
-        const client = new RpcClient(clazz.name, amqpChannel);
+    static create(clazz, amqpChannel, options){
+        const client = new RpcClient(clazz.name, amqpChannel, options);
         const enhancedClazz = class {};
         for(const key of Object.getOwnPropertyNames(clazz.prototype)){
             if(key === 'constructor'){
@@ -30,13 +32,17 @@ class RpcClient {
     }
 
     async call(method, ...args){
+        const timeout = this.#__options.timeout;
+        const signal = AbortSignal.timeout(timeout);
         return new Promise(async (resolve, reject) => {
             try {
+                
                 const methodName = `${this.#resource}:${method}`;
                 const _id = `${Date.now()}#${++this.#__seqNumber}`;
+                signal.onabort = () => reject(new Error(`${methodName}@${this.#__identifier}: request Id ${_id} timed out. Exceed limit ${this.#__options.timeout}ms`));
                 this.#__inFlightMethod.insert(_id, resolve);
                 await this.subscribeToResponse(methodName);
-                await this.amqpChannel.publish(this.#resource, methodName, Buffer.from(JSON.stringify([...args])), { replyTo: this.#__identifier, correlationId: _id });
+                await this.amqpChannel.publish(this.#resource, methodName, Buffer.from(JSON.stringify([...args])), { replyTo: this.#__identifier, correlationId: _id, headers: { 'rpc-expire-at': Date.now() + timeout } });
             } catch(err){
                 return reject(err);
             }

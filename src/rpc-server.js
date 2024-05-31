@@ -1,7 +1,6 @@
 const { RpcUtils } = require('./utils');
 
 /* TODO LIST
-- We should support timeouts
 - Improve reliability for failed scenarios
 */
 
@@ -42,8 +41,16 @@ class RpcServer {
             await this.#channel.bindQueue(methodName, this.#resource, methodName);
             await this.#channel.consume(methodName, async (message) => {
                 const [...args] = JSON.parse(message.content);
-                const { replyTo, correlationId } = message.properties;
+                const { replyTo, correlationId, headers } = message.properties;
+                const rpcExpireAt = headers['rpc-expire-at'];
+                if(rpcExpireAt > Date.now()){
+                    return this.amqpChannel.ack(message);
+                }
+                //TODO: Is it possible to chain an AbortSignal to stop handler?
                 const response = await handler(...args);
+                if(rpcExpireAt > Date.now()){
+                    return this.amqpChannel.ack(message);
+                }
                 const methodResponseQueue = RpcUtils.createClientQueue(this.#resource, replyTo);
                 await this.#channel.publish(this.#resource, methodResponseQueue, Buffer.from(JSON.stringify(response || null)), { correlationId });
                 await this.#channel.ack(message);

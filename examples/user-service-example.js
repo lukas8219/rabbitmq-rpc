@@ -3,11 +3,12 @@ const { RpcClient, RpcServer } = require('../src/rpc');
 const amqplib = require('amqplib');
 
 //util to bottleneck server
-//const sleep = promisify(setTimeout);
+const sleep = promisify(setTimeout);
 
 class UserRpcService {
 
     async fetchUsers(_id){
+        await sleep(5000);
         if(_id === 1){
             return { name: 'Lucas'}
         }
@@ -33,7 +34,7 @@ async function runServer(amqpChannel){
 }
 
 async function runClient(amqpChannel){
-    const UserRpcServiceClient = RpcClient.create(UserRpcService, amqpChannel);
+    const UserRpcServiceClient = RpcClient.create(UserRpcService, amqpChannel, { timeout: 1000 });
 
     const userRpcServiceClient = new UserRpcServiceClient();
 
